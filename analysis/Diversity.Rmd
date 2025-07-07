@@ -1,0 +1,203 @@
+---
+title: "Diversity"
+author: "A.DeMartin"
+date: "2025-07-07"
+output: 
+  html_document:
+    keep_md: true
+    toc: true
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+options(width = 100)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, dev = c("png", "pdf"))
+seed <- 1234
+```
+
+```{r load packages}
+library(ggplot2)
+library(microeco)
+library(file2meco)
+library(data.table)
+library(dplyr)
+library(magrittr)
+library(ggdendro)
+library(DT)
+library(ggpubr)
+library(ggnested)
+library(RColorBrewer)
+library(ggalluvial)
+```
+
+## preprocessing
+```{r, eval=TRUE, include=FALSE}
+clean_column_names <- function(names) {
+  # Replace "Healthy" and identifier (ABR, AB, PS, etc.)
+  names <- gsub(".*(Healthy.*(ABR|AB|PS|CNTL|LIB|REP).*)", "\\1", names)
+  
+  # Replace "ZH Immpath" with the relevant part, keep it intact
+  names <- gsub(".*(ZH_Immpath.*)", "\\1", names)
+  
+  # Remove "_non_host_reads_1" and ".fastq.gz"
+  names <- gsub("_non_host_reads_1", "", names)
+  names <- gsub("_non_host_reads_2", "", names)
+  names <- gsub(".fastq.gz", "", names)
+  
+  names <- gsub(".trimmed_species_profile", "", names)
+  names <- gsub("..01_microdcm_processed.", "", names)
+  names <- gsub(".trimmed_1", "", names)
+
+  
+  names <- gsub("_lib[A-Za-z0-9_]+", "", names)
+  names <- gsub("X01_TCRM_mouse_samples.", "", names)
+	names <- gsub("X01_Healthy_Controls.", "", names)
+	names <- gsub("X01_microdcm_processed.", "", names)
+	
+	names <- gsub("X01_processed.", "", names)
+
+  # Return cleaned names
+  return(names)
+}
+```
+
+```{r}
+combined_sylph <- read.delim("/Users/immbio/Desktop/Project/Angelina/MicrobiomeIH/data/02_sylph_results/sylph_output_table.tsv")
+df <- combined_sylph
+
+colnames(df) <- clean_column_names(colnames(df))
+
+df_subset <- df # potential filtering
+
+formatted_file_path <- "/Users/immbio/Desktop/Project/Angelina/MicrobiomeIH/data/02_sylph_results/formatted_output.mpa"
+fwrite(df_subset, formatted_file_path, sep = "\t", quote = FALSE, col.names = TRUE) #needs to be in a file to convert for microeco
+```
+
+```{r}
+formatted_file_path <- "/Users/immbio/Desktop/Project/Angelina/MicrobiomeIH/data/02_sylph_results/formatted_output.mpa" # output file of the Taxonomic Profiling Pipeline
+
+micro_data <- mpa2meco(formatted_file_path)
+
+otu_table <- micro_data$otu_table 
+taxa_table <- micro_data$tax_table
+sample_table <- micro_data$sample_table
+## add Group (disease cond)
+sample_table$Group[grepl("UIA_STG", rownames(sample_table))] <- "UIA_STG"
+sample_table$Group[grepl("SOS_STG", rownames(sample_table))] <- "SOS_STG"
+sample_table$Group[grepl("CONTROL_STG", rownames(sample_table))] <- "CONTROL_STG"
+
+## add Timepoint 
+sample_table$Timepoint[grepl("D1", rownames(sample_table))] <- "D1"
+sample_table$Timepoint[grepl("D5", rownames(sample_table))] <- "D5"
+sample_table$Timepoint[grepl("D90", rownames(sample_table))] <- "D90"
+
+## combine Group and Timepoint
+sample_table$GroupTimepoint <- paste(sample_table$Group, sample_table$Timepoint , sep = "_")
+
+## add SampleID (patient)
+sample_table$SampleID[grepl("_001_", rownames(sample_table))] <- "001"
+sample_table$SampleID[grepl("_002_", rownames(sample_table))] <- "002"
+sample_table$SampleID[grepl("_003_", rownames(sample_table))] <- "003"
+sample_table$SampleID[grepl("_004_", rownames(sample_table))] <- "004"
+sample_table$SampleID[grepl("_005_", rownames(sample_table))] <- "005"
+sample_table$SampleID[grepl("_007_", rownames(sample_table))] <- "007"
+sample_table$SampleID[grepl("_009_", rownames(sample_table))] <- "009"
+sample_table$SampleID[grepl("_011_", rownames(sample_table))] <- "009"
+sample_table$SampleID[grepl("_014_", rownames(sample_table))] <- "014"
+sample_table$SampleID[grepl("_022_", rownames(sample_table))] <- "022"
+sample_table$SampleID[grepl("_033_", rownames(sample_table))] <- "033"
+sample_table$SampleID[grepl("_035_", rownames(sample_table))] <- "035"
+#sample_table <- sample_table %>%
+  #filter(!grepl("\\.1$", SampleID))
+
+#sample_table <- dplyr::filter(sample_table, grepl("BW", SampleID, ignore.case = TRUE))
+
+sample_table <- droplevels(sample_table)
+micro_data$sample_table <- sample_table
+```
+
+```{r}
+# Combine
+my_colors <- c(
+  rev(brewer.pal(11, "BrBG")),
+  brewer.pal(11, "RdBu"),
+  brewer.pal(11, "PiYG")
+)
+
+# Optional: remove duplicates if any
+my_colors <- unique(my_colors)
+```
+
+```{r}
+micro_data$cal_abund()
+taxa_abundance <- micro_data$taxa_abund
+```
+
+```{r}
+if (!dir.exists("CSV_Export")) {
+  dir.create("CSV_Export")
+} else {
+  # Remove all files in the directory
+  files <- list.files("CSV_Export", full.names = TRUE)
+  if (length(files) > 0) {
+    file.remove(files)
+  }
+}
+
+sample_id <- sample_table$SampleID[1]
+
+for (taxa_level in names(taxa_abundance)) {
+  file_name <- paste0("CSV_Export/", sample_id, "_", taxa_level, ".csv")
+  write.csv(taxa_abundance[[taxa_level]], file_name, row.names = TRUE)
+}
+```
+
+## diversity
+### alpha diversity 
+```{r, fig.height=6, fig.width=10}
+#Creating a trans_alpha object can return two data.frame with the prefix ‘data_’: data_alpha and data_stat. data_alpha is used for subsequent differential test and visualization
+
+t1 <- trans_alpha$new(dataset = micro_data, group = "GroupTimepoint")
+# return t1$data_stat
+head(t1$data_stat) ## The group statistics are stored in object$data_stat
+
+datatable(round(micro_data$alpha_diversity, 5)) ## The transformed diversity data is stored in object$data_alpha
+
+#we test the differences among groups using Kruskal-Wallis Rank Sum Test (overall test when groups > 2), Wilcoxon Rank Sum Tests (for paired groups), Dunn’s Kruskal-Wallis Multiple Comparisons (for paired groups when groups > 2) and anova with multiple comparisons
+
+t1$cal_diff(method = "KW")
+# return t1$res_diff
+head(t1$res_diff) ## The result is stored in object$res_diff ...
+
+## plot
+t1$cal_diff(method = "KW")
+t1$res_diff %<>% base::subset(Significance != "ns") ## not sigificat is not plotted
+t1$plot_alpha(measure = "Shannon", add_sig_text_size = 6, add = "jitter", color_values = my_colors)
+t1$plot_alpha(measure = "InvSimpson", add_sig_text_size = 6, add = "jitter", color_values = my_colors)
+
+#differential test of groups within each group using the by_group parameter
+t1 <- trans_alpha$new(dataset = micro_data, group = "GroupTimepoint")
+t1$cal_diff(method = "KW_dunn")
+t1$plot_alpha(measure = "Shannon", add_sig_text_size = 6, add = "jitter", color_values = my_colors)
+```
+
+### beta diversity
+```{r, fig.height=6, fig.width=10}
+micro_data$cal_betadiv() ## The result is stored in object$beta_diversity
+# create trans_beta object
+# For PCoA and NMDS, measure parameter must be provided.
+# measure parameter should be either one of names(mt_rarefied$beta_diversity) or a customized symmetric matrix
+t1 <- trans_beta$new(dataset = micro_data, group = c("GroupTimepoint"), measure = "bray")
+
+t1$cal_ordination(method = "PCoA") ## The result is stored in object$res_ordination
+class(t1$res_ordination)
+
+t1$plot_ordination(plot_color = "GroupTimepoint", plot_shape = "GroupTimepoint", plot_type = c("point", "ellipse"), color_values = my_colors)
+```
+
+## session info
+```{r date and session info}
+date()
+sessionInfo()
+```

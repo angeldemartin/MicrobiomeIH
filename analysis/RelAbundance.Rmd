@@ -1,0 +1,196 @@
+---
+title: "RelAbundance"
+author: "A.DeMartin"
+date: "2025-07-07"
+output: 
+  html_document:
+    keep_md: true
+    toc: true
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+options(width = 100)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, dev = c("png", "pdf"))
+seed <- 1234
+```
+
+```{r load packages}
+library(ggplot2)
+library(microeco)
+library(file2meco)
+library(data.table)
+library(dplyr)
+library(magrittr)
+library(ggdendro)
+library(DT)
+library(ggpubr)
+library(ggnested)
+library(RColorBrewer)
+library(ggalluvial)
+```
+
+## preprocessing
+```{r, eval=TRUE, include=FALSE}
+clean_column_names <- function(names) {
+  # Replace "Healthy" and identifier (ABR, AB, PS, etc.)
+  names <- gsub(".*(Healthy.*(ABR|AB|PS|CNTL|LIB|REP).*)", "\\1", names)
+  
+  # Replace "ZH Immpath" with the relevant part, keep it intact
+  names <- gsub(".*(ZH_Immpath.*)", "\\1", names)
+  
+  # Remove "_non_host_reads_1" and ".fastq.gz"
+  names <- gsub("_non_host_reads_1", "", names)
+  names <- gsub("_non_host_reads_2", "", names)
+  names <- gsub(".fastq.gz", "", names)
+  
+  names <- gsub(".trimmed_species_profile", "", names)
+  names <- gsub("..01_microdcm_processed.", "", names)
+  names <- gsub(".trimmed_1", "", names)
+
+  
+  names <- gsub("_lib[A-Za-z0-9_]+", "", names)
+  names <- gsub("X01_TCRM_mouse_samples.", "", names)
+	names <- gsub("X01_Healthy_Controls.", "", names)
+	names <- gsub("X01_microdcm_processed.", "", names)
+	
+	names <- gsub("X01_processed.", "", names)
+
+  # Return cleaned names
+  return(names)
+}
+```
+
+```{r}
+combined_sylph <- read.delim("/Users/immbio/Desktop/Project/Angelina/MicrobiomeIH/data/02_sylph_results/sylph_output_table.tsv")
+df <- combined_sylph
+
+colnames(df) <- clean_column_names(colnames(df))
+
+df_subset <- df # potential filtering
+
+formatted_file_path <- "/Users/immbio/Desktop/Project/Angelina/MicrobiomeIH/data/02_sylph_results/formatted_output.mpa"
+fwrite(df_subset, formatted_file_path, sep = "\t", quote = FALSE, col.names = TRUE) #needs to be in a file to convert for microeco
+```
+
+```{r}
+formatted_file_path <- "/Users/immbio/Desktop/Project/Angelina/MicrobiomeIH/data/02_sylph_results/formatted_output.mpa" # output file of the Taxonomic Profiling Pipeline
+
+micro_data <- mpa2meco(formatted_file_path)
+
+otu_table <- micro_data$otu_table 
+taxa_table <- micro_data$tax_table
+sample_table <- micro_data$sample_table
+## add Group (disease cond)
+sample_table$Group[grepl("UIA_STG", rownames(sample_table))] <- "UIA_STG"
+sample_table$Group[grepl("SOS_STG", rownames(sample_table))] <- "SOS_STG"
+sample_table$Group[grepl("CONTROL_STG", rownames(sample_table))] <- "CONTROL_STG"
+
+## add Timepoint 
+sample_table$Timepoint[grepl("D1", rownames(sample_table))] <- "D1"
+sample_table$Timepoint[grepl("D5", rownames(sample_table))] <- "D5"
+sample_table$Timepoint[grepl("D90", rownames(sample_table))] <- "D90"
+
+## combine Group and Timepoint
+sample_table$GroupTimepoint <- paste(sample_table$Group, sample_table$Timepoint , sep = "_")
+
+## add SampleID (patient)
+sample_table$SampleID[grepl("_001_", rownames(sample_table))] <- "001"
+sample_table$SampleID[grepl("_002_", rownames(sample_table))] <- "002"
+sample_table$SampleID[grepl("_003_", rownames(sample_table))] <- "003"
+sample_table$SampleID[grepl("_004_", rownames(sample_table))] <- "004"
+sample_table$SampleID[grepl("_005_", rownames(sample_table))] <- "005"
+sample_table$SampleID[grepl("_007_", rownames(sample_table))] <- "007"
+sample_table$SampleID[grepl("_009_", rownames(sample_table))] <- "009"
+sample_table$SampleID[grepl("_011_", rownames(sample_table))] <- "009"
+sample_table$SampleID[grepl("_014_", rownames(sample_table))] <- "014"
+sample_table$SampleID[grepl("_022_", rownames(sample_table))] <- "022"
+sample_table$SampleID[grepl("_033_", rownames(sample_table))] <- "033"
+sample_table$SampleID[grepl("_035_", rownames(sample_table))] <- "035"
+#sample_table <- sample_table %>%
+  #filter(!grepl("\\.1$", SampleID))
+
+#sample_table <- dplyr::filter(sample_table, grepl("BW", SampleID, ignore.case = TRUE))
+
+sample_table <- droplevels(sample_table)
+micro_data$sample_table <- sample_table
+```
+
+```{r}
+# Combine
+my_colors <- c(
+  rev(brewer.pal(11, "BrBG")),
+  brewer.pal(11, "RdBu"),
+  brewer.pal(11, "PiYG")
+)
+
+# Optional: remove duplicates if any
+my_colors <- unique(my_colors)
+```
+
+```{r}
+micro_data$cal_abund()
+taxa_abundance <- micro_data$taxa_abund
+```
+
+```{r}
+if (!dir.exists("CSV_Export")) {
+  dir.create("CSV_Export")
+} else {
+  # Remove all files in the directory
+  files <- list.files("CSV_Export", full.names = TRUE)
+  if (length(files) > 0) {
+    file.remove(files)
+  }
+}
+
+sample_id <- sample_table$SampleID[1]
+
+for (taxa_level in names(taxa_abundance)) {
+  file_name <- paste0("CSV_Export/", sample_id, "_", taxa_level, ".csv")
+  write.csv(taxa_abundance[[taxa_level]], file_name, row.names = TRUE)
+}
+```
+
+## abundance
+### Phylum
+```{r, fig.height=6, fig.width=10}
+# create trans_abund object
+# select top 15 abundant Phyla.
+t1 <- trans_abund$new(dataset = micro_data, taxrank = "Phylum", ntaxa = 10)
+t1$plot_bar(others_color = "grey70", facet = c("Group", "Timepoint"), xtext_keep = FALSE, legend_text_italic = FALSE, color_values = my_colors)
+```
+
+### Genus
+```{r, fig.height=6, fig.width=10}
+# create trans_abund object
+# select top 20 abundant Genera.
+t1 <- trans_abund$new(dataset = micro_data, taxrank = "Genus", ntaxa = 20)
+t1$plot_bar(others_color = "grey70", facet = c("Group","Timepoint"), xtext_keep = FALSE, legend_text_italic = FALSE, color_values = my_colors)
+
+# require ggalluvial package
+# use_alluvium = TRUE make the alluvial plot, clustering =TRUE can be used to reorder the samples by clustering
+# bar_type = FALSE can remove 'others'
+t1$plot_bar(bar_full = FALSE, use_alluvium = TRUE, clustering = FALSE, xtext_angle = 30, xtext_size = 5, color_values = my_colors)
+t1$plot_bar(bar_full = FALSE, use_alluvium = TRUE, clustering = FALSE, xtext_angle = 30, xtext_size = 5, color_values = my_colors, facet = c("Group", "Timepoint"))
+t1$plot_bar(bar_full = FALSE, use_alluvium = TRUE, clustering = TRUE, xtext_angle = 30, xtext_size = 5, color_values = my_colors)
+```
+
+### Species
+```{r, fig.width=10} 
+t1 <- trans_abund$new(dataset = micro_data, taxrank = "Species", ntaxa = 30)
+t1$plot_bar(others_color = "grey70", facet = c("Group", "Timepoint"), xtext_keep = FALSE, legend_text_italic = FALSE, color_values = my_colors)
+```
+
+```{r, fig.width=14, fig.height=16} 
+t1 <- trans_abund$new(dataset = micro_data, taxrank = "Species", ntaxa = 100)
+g1 <- t1$plot_heatmap(xtext_keep = T,xtext_angle=90, withmargin = FALSE, plot_breaks = c(0.01, 0.1, 1, 10), facet = c("Group", "Timepoint"))
+g1 + theme(axis.text.y = element_text(face = 'italic'))
+```
+
+## session info
+```{r date and session info}
+date()
+sessionInfo()
+```
